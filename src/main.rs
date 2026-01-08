@@ -113,7 +113,14 @@ fn main() {
 	*/
     App::new()
     	// Default plugins provide us base rendering, physics, etc.
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title : "Rusty Snake".into(), // Set the window title here
+                // other window settings can be added here
+                ..default()
+            }),
+            ..default()
+        }))
         // Adding the SnakeState to the project so it can be accessed.
         // Kinda works like a global/static variable in a way.
         .insert_resource(SnakeState {
