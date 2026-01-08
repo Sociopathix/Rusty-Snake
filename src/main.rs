@@ -26,6 +26,20 @@ const RED : Color = Color::srgb(0.75, 0.25, 0.25);
 
 
 
+#[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
+enum GameState {
+    #[default]
+    Playing,
+    GameOver,
+}
+
+
+
+#[derive(Component)]
+struct GameOverUI;
+
+
+
 // An enum that represents the possible directions.
 #[derive(Copy, Clone, Eq, PartialEq)] // Allows us to use equality operators.
 enum Direction { None, Up, Down, Left, Right }
@@ -121,6 +135,7 @@ fn main() {
             }),
             ..default()
         }))
+        .init_state::<GameState>()
         // Adding the SnakeState to the project so it can be accessed.
         // Kinda works like a global/static variable in a way.
         .insert_resource(SnakeState {
@@ -140,11 +155,19 @@ fn main() {
         // Allows us to close the game with the esc key.
         .add_systems(Update, exit_sys)
         // Everything else that should be updated when the timer loops.
-        .add_systems(FixedUpdate, (move_snake_sys, 
-        						   grow_snake_sys,
-        						   wall_collision_sys, 
-        						   food_collision_sys,
-        						   snake_collision_sys))
+        .add_systems(
+        	FixedUpdate, (
+        		move_snake_sys, 
+        		grow_snake_sys,
+        		wall_collision_sys, 
+        		food_collision_sys,
+        		snake_collision_sys
+        	)
+        	.run_if(in_state(GameState::Playing)),
+        )
+        .add_systems(Update, restart_on_input.run_if(in_state(GameState::GameOver)))
+        .add_systems(OnEnter(GameState::GameOver), spawn_game_over_ui)
+        .add_systems(OnExit(GameState::GameOver), cleanup_game_over_ui)
         .run();
 }
 
@@ -290,6 +313,76 @@ fn spawn_food_sys(mut commands : Commands) {
 
 
 
+fn spawn_game_over_ui(mut commands: Commands) {
+    commands.spawn((
+        GameOverUI,
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+    ))
+    .with_children(|parent| {
+        parent.spawn((
+    		Text::new("GAME OVER\nPress SPACE to restart"),
+    		TextFont {
+        		font_size : 48.0,
+        		..default()
+    		},
+    		TextColor(WHITE),
+    		TextLayout::new(Justify::Center, LineBreak::WordBoundary),
+		));
+    });
+}
+
+
+
+fn cleanup_game_over_ui(
+    mut commands: Commands,
+    ui: Query<Entity, With<GameOverUI>>,
+) {
+    for e in &ui {
+        commands.entity(e).despawn();
+    }
+}
+
+
+
+fn restart_on_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut commands : Commands,
+    mut next_state : ResMut<NextState<GameState>>,
+    mut snake : ResMut<SnakeState>,
+    mut head : Query<Entity, With<SnakeHead>>,
+    segments : Query<Entity, With<SnakeSegment>>,
+) {
+    if keys.just_pressed(KeyCode::Space) {
+        // Despawn snake
+        if let Ok(e) = head.single_mut() {
+            commands.entity(e).despawn();
+        }
+        for e in segments.iter() {
+            commands.entity(e).despawn();
+        }
+
+        // Reset state
+        snake.segments.clear();
+        snake.dir = Direction::None;
+        snake.next_dir = Direction::None;
+        snake.grow = 0;
+
+        // Respawn
+        spawn_snake_sys(commands);
+
+        next_state.set(GameState::Playing);
+    }
+}
+
+
+
 // Gets a random cell position based on the number of cells in the grid.
 fn get_random_pos() -> GridPosition {
 	let col = rand::thread_rng().gen_range(0..NUM_CELLS);
@@ -421,7 +514,8 @@ fn wall_collision_sys(
 	mut commands : Commands,
 	mut snake : ResMut<SnakeState>,
 	mut head : Query<(Entity, &mut GridPosition), (With<SnakeHead>, Changed<GridPosition>)>,
-	segments : Query<Entity, With<SnakeSegment>>
+	segments : Query<Entity, With<SnakeSegment>>,
+	mut next_state: ResMut<NextState<GameState>>
 ) {
 	let (head_entity, head_pos) = head.single_mut().unwrap();
 
@@ -440,6 +534,7 @@ fn wall_collision_sys(
 		}
 		
 		spawn_snake_sys(commands);
+		next_state.set(GameState::GameOver);
 	}
 }
 
@@ -471,6 +566,7 @@ fn snake_collision_sys(
     mut snake : ResMut<SnakeState>,
     mut head_query : Query<(Entity, &GridPosition), With<SnakeHead>>,
     seg_query : Query<(Entity, &GridPosition), With<SnakeSegment>>,
+    mut next_state: ResMut<NextState<GameState>>
 ) {
     let (head_entity, head_pos) = head_query.single_mut().unwrap();
 
@@ -493,6 +589,8 @@ fn snake_collision_sys(
 
         // Spawn the new snake!
         spawn_snake_sys(commands);
+        
+        next_state.set(GameState::GameOver);
     }
 }
 
